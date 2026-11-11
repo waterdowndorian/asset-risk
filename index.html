@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#112c50">
+  <title>배전설비 위험도 평가</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./evaluation.js" defer></script>
+  <script src="./charts.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="shell masthead-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <strong>배전설비 위험도 평가</strong>
+      </div>
+      <div class="toolbar">
+        <span class="demo-label"><span aria-hidden="true"></span>시범 데이터</span>
+        <button type="button" class="header-button" id="export">CSV 내보내기</button>
+        <button type="button" class="header-button" id="fullscreen" aria-pressed="false">전체화면</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="navigation" aria-label="평가 시스템 메뉴">
+    <div class="shell nav-inner">
+      <button type="button" data-page="overview" aria-current="page">위험도 종합</button>
+      <button type="button" data-page="assets">설비 목록</button>
+      <button type="button" data-page="model">평가지수 검토</button>
+    </div>
+  </nav>
+
+  <main class="shell workspace">
+    <p id="screen-notice" class="notice" role="status" hidden></p>
+
+    <div class="page-heading">
+      <div>
+        <h1 id="page-title">위험도 종합</h1>
+        <p id="page-context">시범 상대 위험도 평가 · 100점 척도</p>
+      </div>
+      <div class="filters" id="filters" aria-label="설비 필터">
+        <label class="search-field">
+          <span class="visually-hidden">설비번호·유형·지사 검색</span>
+          <input id="search" type="search" placeholder="설비번호·유형·지사 검색" autocomplete="off">
+        </label>
+        <label>
+          <span class="visually-hidden">설비 유형</span>
+          <select id="type"><option value="">전체 설비</option></select>
+        </label>
+        <label>
+          <span class="visually-hidden">위험도 구분</span>
+          <select id="grade">
+            <option value="">전체 구분</option>
+            <option>우선 검토</option>
+            <option>관찰</option>
+            <option>일반</option>
+          </select>
+        </label>
+        <button type="button" class="outline-button" id="reset">초기화</button>
+      </div>
+    </div>
+
+    <section id="summary" class="summary" aria-label="위험도 요약">
+      <article class="stat">
+        <span>평가 대상</span>
+        <div><strong id="stat-count">—</strong> <small>개 설비</small></div>
+      </article>
+      <article class="stat stat-priority">
+        <span>우선 검토</span>
+        <div><strong id="stat-priority">—</strong> <small>개 설비</small></div>
+      </article>
+      <article class="stat">
+        <span>평균 위험도</span>
+        <div><strong id="stat-average">—</strong> <small>점</small></div>
+      </article>
+      <article class="stat">
+        <span>최고 위험도</span>
+        <div><strong id="stat-maximum">—</strong> <small id="stat-maximum-asset"></small></div>
+      </article>
+    </section>
+
+    <div id="charts" class="chart-grid">
+      <section class="panel chart-panel" aria-labelledby="scatter-title">
+        <div class="panel-heading">
+          <h2 id="scatter-title">설비별 HI–위험도 분포</h2>
+          <div class="legend" aria-label="분포도 범례">
+            <span><i class="dot dot-priority"></i>우선 검토</span>
+            <span><i class="dot dot-other"></i>기타</span>
+          </div>
+        </div>
+        <div id="scatter" class="scatter"></div>
+        <p class="chart-caption">HI가 높을수록 상태 양호 · 원 크기는 고장영향 점수 · 점 선택으로 상세 조회</p>
+      </section>
+
+      <section class="panel chart-panel" aria-labelledby="ranking-title">
+        <div class="panel-heading">
+          <h2 id="ranking-title">점검·교체 검토 우선순위</h2>
+          <div class="metric-control" role="group" aria-label="우선순위 그래프 정렬 기준">
+            <button type="button" data-metric="risk" aria-pressed="true">위험도순</button>
+            <button type="button" data-metric="hi" aria-pressed="false">HI 낮은 순</button>
+          </div>
+        </div>
+        <div id="ranking" class="ranking"></div>
+        <p class="chart-caption" id="ranking-caption"></p>
+      </section>
+    </div>
+
+    <div id="results" class="result-grid">
+      <section class="panel asset-list" aria-labelledby="list-title">
+        <div class="panel-heading">
+          <h2 id="list-title">설비별 평가 결과</h2>
+          <span id="count" class="count"></span>
+        </div>
+        <div class="table-wrap" tabindex="0" aria-label="설비별 평가 결과 표">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">전체 순위</th>
+                <th scope="col">설비번호</th>
+                <th scope="col">설비 유형</th>
+                <th scope="col">지사</th>
+                <th scope="col" class="number-cell">HI</th>
+                <th scope="col" class="number-cell" id="risk-header" aria-sort="descending">
+                  <button type="button" id="sort" class="table-sort" title="위험도 정렬">위험도 <span aria-hidden="true">↓</span></button>
+                </th>
+                <th scope="col">위험도 구분</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel asset-detail" id="asset-detail" aria-labelledby="detail-heading">
+        <div class="panel-heading">
+          <h2 id="detail-heading">선택 설비</h2>
+          <span id="detail-rank" class="count"></span>
+        </div>
+        <p id="detail-empty" class="empty-message" hidden>필터에 해당하는 설비가 없습니다.</p>
+        <div id="detail-content">
+          <div class="asset-identity">
+            <strong id="detail-id"></strong>
+            <span id="detail-meta"></span>
+          </div>
+          <dl class="detail-metrics">
+            <div><dt>상태지수 HI</dt><dd id="detail-hi">—</dd></div>
+            <div><dt>위험도 지수</dt><dd id="detail-risk">—</dd></div>
+          </dl>
+          <p id="detail-action" class="detail-action"></p>
+          <details class="asset-factors">
+            <summary>평가인자 점수</summary>
+            <dl>
+              <div><dt>상태 취약도</dt><dd id="detail-condition">—</dd></div>
+              <div><dt>운전 부담</dt><dd id="detail-operation">—</dd></div>
+              <div><dt>고장 영향</dt><dd id="detail-consequence">—</dd></div>
+            </dl>
+          </details>
+        </div>
+      </section>
+    </div>
+
+    <div id="model" class="model-view" hidden>
+      <section class="panel workflow-panel" aria-labelledby="workflow-title">
+        <h2 id="workflow-title">연구 제안의 평가 절차</h2>
+        <ol class="workflow">
+          <li><strong>데이터 입력</strong><span>자산·점검·운전·고장이력</span></li>
+          <li><strong>자료 연계·품질 검토</strong><span>설비 ID 매핑, 결측·이상치 확인</span></li>
+          <li><strong>평가지수 산정</strong><span>HI·상대 위험도·정량 위험도</span></li>
+          <li><strong>우선순위 검토</strong><span>점검·교체·투자 검토</span></li>
+        </ol>
+      </section>
+
+      <div class="model-grid">
+        <section class="panel model-panel" aria-labelledby="weight-title">
+          <div class="panel-heading">
+            <h2 id="weight-title">위험도 평가지수 (신규 검토)</h2>
+          </div>
+          <p class="model-intro">시연용 상대 위험점수에 적용할 가중치를 조정합니다.</p>
+          <form id="weight-form">
+            <div class="weight-fields">
+              <label>상태 취약도<input id="w0" type="number" min="0" max="100" step="any" required></label>
+              <label>운전 부담<input id="w1" type="number" min="0" max="100" step="any" required></label>
+              <label>고장 영향<input id="w2" type="number" min="0" max="100" step="any" required></label>
+            </div>
+            <p class="field-note">입력값을 합계로 나누어 가중치를 정규화합니다.</p>
+            <div class="form-actions">
+              <button type="submit" class="primary-button">가중치 적용</button>
+              <button type="button" class="outline-button" id="reset-weights">기본값 적용</button>
+            </div>
+          </form>
+          <p id="weight-status" class="weight-status" role="status"></p>
+          <div class="formula-block">
+            <h3>적용 중인 산정식</h3>
+            <p id="formula" class="formula"></p>
+            <p class="formula-note">HI = 100 − 상태 취약도</p>
+          </div>
+          <p class="field-note">위험도 구분에는 반올림 전 점수를 적용합니다. 70점 이상은 ‘우선 검토’, 40점 이상 70점 미만은 ‘관찰’, 40점 미만은 ‘일반’입니다.</p>
+          <p class="field-note">위험도 70점 이상과 HI 40점 미만이 겹치면 교체 타당성 검토 대상으로 표시합니다.</p>
+          <div class="model-summary">
+            <p id="model-outcome"></p>
+            <button type="button" class="outline-button" id="show-overview">평가 결과 보기</button>
+          </div>
+        </section>
+
+        <section class="panel model-panel" aria-labelledby="comparison-title">
+          <h2 id="comparison-title">데이터 확보 수준별 평가 방식</h2>
+          <div class="comparison">
+            <article>
+              <div><h3>상태지수 HI</h3><span class="model-tag implemented">시연</span></div>
+              <p>점검·진단 정보를 바탕으로 설비 상태를 비교합니다.</p>
+            </article>
+            <article>
+              <div><h3>상대 위험도 RI</h3><span class="model-tag implemented">시연</span></div>
+              <p>상태·운전·영향 점수의 가중합으로 검토 순위를 산정합니다.</p>
+            </article>
+            <article>
+              <div><h3>정량 위험도 <span class="math">PoF × CoF</span></h3><span class="model-tag">연구 검토</span></div>
+              <p>관측기간과 고장이력으로 PoF를 추정하고, 정의된 고장영향 CoF를 적용합니다.</p>
+            </article>
+            <article>
+              <div><h3>시간가변 위험도 <span class="math">RI(t)</span></h3><span class="model-tag">연구 검토</span></div>
+              <p>시계열 자료에서 최근·반복 노출과 지속시간을 반영하는 방법을 검토합니다.</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer>제안발표용 시연 · 점수, 구분 기준 및 점검·교체 검토 방향은 가상 자료를 사용한 예시입니다.</footer>
+    <noscript><p class="notice">평가 화면을 사용하려면 브라우저에서 JavaScript를 활성화해 주세요.</p></noscript>
+  </main>
+</body>
+</html>
