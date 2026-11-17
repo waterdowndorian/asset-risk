@@ -3,6 +3,8 @@
 
   const evaluation = window.RiskEvaluation;
   const charts = window.RiskCharts;
+  const data = window.RiskData;
+  const dataPanel = window.RiskDataPanel;
   const byId = id => document.getElementById(id);
   const setText = (id, text) => { byId(id).textContent = text; };
   const search = byId('search');
@@ -15,16 +17,23 @@
   const weightInputs = [byId('w0'), byId('w1'), byId('w2')];
 
   const pages = {
-    overview: ['위험도 종합', '시범 상대 위험도 평가 · 100점 척도'],
-    assets: ['설비 목록', '전체 위험도 순위와 설비별 검토 방향을 확인합니다.'],
+    overview: ['위험도 종합', '상대 위험도 RI와 정량 위험도 Risk · 0~100점'],
+    assets: ['설비 목록', '설비별 평가 지표와 전체 순위를 확인하고 비교합니다.'],
+    data: ['데이터 업로드', '자산·상태·운전·고장이력 요약 자료'],
     model: ['평가지수 검토', '평가 절차, 시연용 가중치, 연구에서 검토할 평가 방식을 확인합니다.'],
   };
 
+  const compareA = byId('compare-a');
+  const compareB = byId('compare-b');
+  const format = (value, digits = 1) => value == null ? '—' : value.toFixed(digits);
+  const formatPoF = value => value == null ? '—' : format(value * 100, 2);
+  let assets = evaluation.demoAssets;
   let weights = [...evaluation.defaultWeights];
   let evaluated = [];
   let visibleRows = [];
   let selected = null;
   let ascending = false;
+  let sortKey = 'rank';
   let metric = 'risk';
   let scatterWidth = 0;
 
@@ -35,7 +44,11 @@
       return label.includes(query) && (!type.value || asset.type === type.value)
         && (!grade.value || asset.grade === grade.value);
     });
-    return ascending ? rows.reverse() : rows;
+    return rows.sort((a, b) => {
+      if (a[sortKey] === null) return b[sortKey] === null ? a.rank - b.rank : 1;
+      if (b[sortKey] === null) return -1;
+      return ascending ? b[sortKey] - a[sortKey] : a[sortKey] - b[sortKey];
+    });
   }
 
   function averageRisk(rows) {
@@ -49,7 +62,9 @@
   }
 
   function renderSummary() {
-    const highest = visibleRows[ascending ? visibleRows.length - 1 : 0];
+    const highest = visibleRows.reduce((current, asset) => {
+      return !current || asset.risk > current.risk ? asset : current;
+    }, null);
     setText('stat-count', visibleRows.length);
     setText('stat-priority', priorityCount(visibleRows));
     setText('stat-average', averageRisk(visibleRows));
@@ -77,6 +92,8 @@
     const cells = [
       [asset.rank, ''], [button, ''], [asset.type, ''], [asset.office, ''],
       [asset.hi.toFixed(1), 'number-cell'], [asset.risk.toFixed(1), 'number-cell score'],
+      [formatPoF(asset.pof), 'number-cell'], [format(asset.consequence), 'number-cell'],
+      [format(asset.quantitativeRisk), 'number-cell score'], [asset.quantitativeRank ?? '—', ''],
       [badge, ''],
     ];
     for (const [value, className] of cells) {
@@ -93,13 +110,22 @@
 
   function renderTable() {
     setText('count', visibleRows.length + '개 설비');
-    byId('risk-header').setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
-    byId('sort').querySelector('span').textContent = ascending ? '↑' : '↓';
+    const sortControls = [
+      ['rank', 'risk-header', 'sort'],
+      ['quantitativeRank', 'quantitative-header', 'sort-quantitative'],
+    ];
+    for (const [key, header, button] of sortControls) {
+      const active = key === sortKey;
+      byId(header).setAttribute('aria-sort', active ? (ascending ? 'ascending' : 'descending') : 'none');
+      byId(button).querySelector('span').textContent = active ? (ascending ? '↑' : '↓') : '';
+    }
 
     if (visibleRows.length) {
-      tableBody.replaceChildren(...visibleRows.map(makeRow));
+      const fragment = document.createDocumentFragment();
+      for (const asset of visibleRows) fragment.append(makeRow(asset));
+      tableBody.replaceChildren(fragment);
     } else {
-      tableBody.innerHTML = '<tr><td class="empty-message" colspan="7">검색 조건에 해당하는 설비가 없습니다.</td></tr>';
+      tableBody.innerHTML = '<tr><td class="empty-message" colspan="11">검색 조건에 해당하는 설비가 없습니다.</td></tr>';
     }
   }
 
@@ -107,18 +133,58 @@
     const asset = visibleRows.find(row => row.id === selected);
     byId('detail-empty').hidden = Boolean(asset);
     byId('detail-content').hidden = !asset;
-    setText('detail-rank', asset ? '전체 ' + asset.rank + '위' : '');
+    setText('detail-rank', asset ? 'RI ' + asset.rank + '위' : '');
     if (!asset) return;
 
     setText('detail-id', asset.id);
     setText('detail-meta', [asset.type, asset.office, '사용 ' + asset.age + '년'].join(' · '));
     setText('detail-hi', asset.hi.toFixed(1));
     setText('detail-risk', asset.risk.toFixed(1));
+    setText('detail-pof', asset.pof === null ? '—' : formatPoF(asset.pof) + '%');
+    setText('detail-quantitative', format(asset.quantitativeRisk));
     setText('detail-action', asset.action);
     byId('detail-action').classList.toggle('priority', asset.priority);
     setText('detail-condition', asset.condition);
     setText('detail-operation', asset.operation);
     setText('detail-consequence', asset.consequence);
+  }
+
+  function updateComparisonOptions() {
+    for (const [index, control] of [compareA, compareB].entries()) {
+      control.replaceChildren();
+      for (const asset of evaluated) control.add(new Option(asset.id, asset.id));
+      control.selectedIndex = Math.min(index, evaluated.length - 1);
+    }
+  }
+
+  function renderComparison() {
+    const left = evaluated.find(asset => asset.id === compareA.value);
+    const right = evaluated.find(asset => asset.id === compareB.value);
+    if (!left || !right) return;
+    setText('compare-a-name', left.id);
+    setText('compare-b-name', right.id);
+
+    const metrics = [
+      ['상태지수 HI', asset => format(asset.hi)],
+      ['1년 PoF (%)', asset => formatPoF(asset.pof)],
+      ['고장영향 CoF', asset => format(asset.consequence)],
+      ['상대 위험도 RI', asset => format(asset.risk)],
+      ['RI 순위', asset => asset.rank],
+      ['정량 위험도 Risk', asset => format(asset.quantitativeRisk)],
+      ['Risk 순위', asset => asset.quantitativeRank ?? '—'],
+    ];
+    const rows = document.createDocumentFragment();
+    for (const [label, value] of metrics) {
+      const row = document.createElement('tr');
+      const header = document.createElement('th');
+      header.scope = 'row';
+      header.textContent = label;
+      row.append(header);
+      row.insertCell().textContent = value(left);
+      row.insertCell().textContent = value(right);
+      rows.append(row);
+    }
+    byId('compare-result').replaceChildren(rows);
   }
 
   function renderScatter() {
@@ -164,6 +230,7 @@
     const [title, context] = pages[page];
     const overview = page === 'overview';
     const model = page === 'model';
+    const input = page === 'data';
     document.querySelectorAll('[data-page]').forEach(button => {
       if (button.dataset.page === page) {
         button.setAttribute('aria-current', 'page');
@@ -173,12 +240,14 @@
     });
     setText('page-title', title);
     setText('page-context', context);
-    byId('filters').hidden = model;
+    byId('filters').hidden = model || input;
     byId('summary').hidden = !overview;
     chartSection.hidden = !overview;
-    byId('results').hidden = model;
+    byId('results').hidden = model || input;
+    byId('asset-compare').hidden = page !== 'assets';
+    byId('data-panel').hidden = !input;
     byId('model').hidden = !model;
-    byId('export').hidden = model;
+    byId('export').hidden = model || input;
     if (overview) {
       renderScatter();
       renderRanking();
@@ -188,7 +257,7 @@
 
   function updateWeights(nextWeights, message = '') {
     weights = nextWeights;
-    evaluated = evaluation.evaluate(evaluation.demoAssets, weights);
+    evaluated = evaluation.evaluate(assets, weights);
     const total = evaluation.totalWeight(weights);
     const terms = weights.map((weight, index) => {
       return (weight / total).toFixed(3) + ' × ' + evaluation.factors[index];
@@ -200,26 +269,39 @@
     setText('weight-status', message);
     byId('weight-status').classList.remove('error');
     renderResults();
+    renderComparison();
   }
 
   function exportResults() {
-    const keys = ['rank', 'id', 'type', 'office', 'hi', 'risk', 'action'];
-    const rows = [keys, ...visibleRows.map(asset => keys.map(key => asset[key]))];
-    const csv = '\ufeff' + rows.map(row => {
-      return row.map(value => '"' + String(value).replace(/"/g, '""') + '"').join(',');
-    }).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'presentation-demo-results.csv';
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const keys = [
+      'ri_rank', 'id', 'type', 'office', 'hi', 'ri_score',
+      'pof_1y', 'cof_score', 'risk_score', 'risk_rank', 'action',
+    ];
+    const rows = visibleRows.map(asset => [
+      asset.rank, asset.id, asset.type, asset.office, asset.hi, asset.risk,
+      asset.pof, asset.consequence, asset.quantitativeRisk, asset.quantitativeRank, asset.action,
+    ]);
+    dataPanel.downloadCSV('asset-risk-results.csv', data.toCSV([keys, ...rows]));
   }
 
-  for (const value of new Set(evaluation.demoAssets.map(asset => asset.type))) {
-    type.add(new Option(value));
+  function clearFilters() {
+    search.value = '';
+    type.value = '';
+    grade.value = '';
+  }
+
+  function setAssets(nextAssets, name) {
+    assets = nextAssets;
+    selected = null;
+    sortKey = 'rank';
+    ascending = false;
+    type.replaceChildren(new Option('전체 설비', ''));
+    for (const value of new Set(assets.map(asset => asset.type))) type.add(new Option(value, value));
+    clearFilters();
+    setText('data-source', name);
+    updateWeights(weights);
+    updateComparisonOptions();
+    renderComparison();
   }
 
   document.querySelectorAll('[data-page]').forEach(button => {
@@ -231,15 +313,17 @@
   type.addEventListener('change', renderResults);
   grade.addEventListener('change', renderResults);
   byId('reset').addEventListener('click', () => {
-    search.value = '';
-    type.value = '';
-    grade.value = '';
+    clearFilters();
     renderResults();
   });
-  byId('sort').addEventListener('click', () => {
-    ascending = !ascending;
-    renderResults();
-  });
+  for (const [button, key] of [['sort', 'rank'], ['sort-quantitative', 'quantitativeRank']]) {
+    byId(button).addEventListener('click', () => {
+      ascending = sortKey === key && !ascending;
+      sortKey = key;
+      renderResults();
+    });
+  }
+  for (const control of [compareA, compareB]) control.addEventListener('change', renderComparison);
 
   const metricButtons = document.querySelectorAll('[data-metric]');
   metricButtons.forEach(button => {
@@ -305,5 +389,12 @@
       if (!chartSection.hidden && scatter.clientWidth !== scatterWidth) renderScatter();
     }).observe(scatter);
   }
-  updateWeights(weights);
+  dataPanel.wireDataPanel(
+    (imported, name) => {
+      setAssets(imported, name);
+      showPage('assets');
+    },
+    () => setAssets(evaluation.demoAssets, '시범 데이터'),
+  );
+  setAssets(evaluation.demoAssets, '시범 데이터');
 })();

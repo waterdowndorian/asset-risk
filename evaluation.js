@@ -25,7 +25,7 @@
   function evaluate(assets, weights) {
     const total = totalWeight(weights);
 
-    return assets.map(asset => {
+    const ranked = assets.map(asset => {
       const hi = 100 - asset.condition;
       const weighted = asset.condition * weights[0] + asset.operation * weights[1]
         + asset.consequence * weights[2];
@@ -41,9 +41,18 @@
         action = '우선 점검 검토';
       }
 
-      return { ...asset, hi, risk, priority, grade, action };
+      const pof = asset.years_observed > 0
+        ? -Math.expm1(-asset.failure_count / asset.years_observed)
+        : null;
+      const quantitativeRisk = pof === null ? null : pof * asset.consequence;
+      return { ...asset, hi, risk, pof, quantitativeRisk, priority, grade, action };
     }).sort((a, b) => b.risk - a.risk || a.id.localeCompare(b.id))
-      .map((asset, index) => ({ ...asset, rank: index + 1 }));
+      .map((asset, index) => ({ ...asset, rank: index + 1, quantitativeRank: null }));
+
+    ranked.filter(asset => asset.quantitativeRisk !== null)
+      .sort((a, b) => b.quantitativeRisk - a.quantitativeRisk || a.id.localeCompare(b.id))
+      .forEach((asset, index) => { asset.quantitativeRank = index + 1; });
+    return ranked;
   }
 
   window.RiskEvaluation = { defaultWeights, demoAssets, factors, criteria, totalWeight, evaluate };

@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#112c50">
   <title>배전설비 위험도 평가</title>
-  <link rel="stylesheet" href="./style.css">
-  <script src="./evaluation.js" defer></script>
+  <link rel="stylesheet" href="./style.css?v=20261117">
+  <script src="./evaluation.js?v=20261117" defer></script>
+  <script src="./data-input.js?v=20261117" defer></script>
+  <script src="./data-panel.js?v=20261117" defer></script>
   <script src="./charts.js" defer></script>
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=20261117" defer></script>
 </head>
 <body>
   <header class="masthead">
@@ -18,7 +20,7 @@
         <strong>배전설비 위험도 평가</strong>
       </div>
       <div class="toolbar">
-        <span class="demo-label"><span aria-hidden="true"></span>시범 데이터</span>
+        <span class="demo-label"><span aria-hidden="true"></span><b id="data-source">시범 데이터</b></span>
         <button type="button" class="header-button" id="export">CSV 내보내기</button>
         <button type="button" class="header-button" id="fullscreen" aria-pressed="false">전체화면</button>
       </div>
@@ -30,6 +32,7 @@
       <button type="button" data-page="overview" aria-current="page">위험도 종합</button>
       <button type="button" data-page="assets">설비 목록</button>
       <button type="button" data-page="model">평가지수 검토</button>
+      <button type="button" data-page="data">데이터 업로드</button>
     </div>
   </nav>
 
@@ -39,7 +42,7 @@
     <div class="page-heading">
       <div>
         <h1 id="page-title">위험도 종합</h1>
-        <p id="page-context">시범 상대 위험도 평가 · 100점 척도</p>
+        <p id="page-context">상대 위험도 RI와 정량 위험도 Risk · 0~100점</p>
       </div>
       <div class="filters" id="filters" aria-label="설비 필터">
         <label class="search-field">
@@ -73,11 +76,11 @@
         <div><strong id="stat-priority">—</strong> <small>개 설비</small></div>
       </article>
       <article class="stat">
-        <span>평균 위험도</span>
+        <span>평균 상대 위험도</span>
         <div><strong id="stat-average">—</strong> <small>점</small></div>
       </article>
       <article class="stat">
-        <span>최고 위험도</span>
+        <span>최고 상대 위험도</span>
         <div><strong id="stat-maximum">—</strong> <small id="stat-maximum-asset"></small></div>
       </article>
     </section>
@@ -118,15 +121,21 @@
           <table>
             <thead>
               <tr>
-                <th scope="col">전체 순위</th>
+                <th scope="col">RI 순위</th>
                 <th scope="col">설비번호</th>
                 <th scope="col">설비 유형</th>
                 <th scope="col">지사</th>
                 <th scope="col" class="number-cell">HI</th>
                 <th scope="col" class="number-cell" id="risk-header" aria-sort="descending">
-                  <button type="button" id="sort" class="table-sort" title="위험도 정렬">위험도 <span aria-hidden="true">↓</span></button>
+                  <button type="button" id="sort" class="table-sort" title="상대 위험도 정렬">RI <span aria-hidden="true">↓</span></button>
                 </th>
-                <th scope="col">위험도 구분</th>
+                <th scope="col" class="number-cell">PoF (%)</th>
+                <th scope="col" class="number-cell">CoF</th>
+                <th scope="col" class="number-cell" id="quantitative-header">
+                  <button type="button" id="sort-quantitative" class="table-sort" title="정량 위험도 정렬">Risk <span aria-hidden="true"></span></button>
+                </th>
+                <th scope="col">Risk 순위</th>
+                <th scope="col">RI 구분</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -147,7 +156,9 @@
           </div>
           <dl class="detail-metrics">
             <div><dt>상태지수 HI</dt><dd id="detail-hi">—</dd></div>
-            <div><dt>위험도 지수</dt><dd id="detail-risk">—</dd></div>
+            <div><dt>상대 위험도 RI</dt><dd id="detail-risk">—</dd></div>
+            <div><dt>1년 PoF</dt><dd id="detail-pof">—</dd></div>
+            <div><dt>정량 위험도</dt><dd id="detail-quantitative">—</dd></div>
           </dl>
           <p id="detail-action" class="detail-action"></p>
           <details class="asset-factors">
@@ -161,6 +172,49 @@
         </div>
       </section>
     </div>
+
+    <section id="asset-compare" class="panel asset-compare" aria-labelledby="compare-title" hidden>
+      <div class="panel-heading"><h2 id="compare-title">설비 비교</h2></div>
+      <div class="compare-picker">
+        <label>설비 A <select id="compare-a"></select></label>
+        <label>설비 B <select id="compare-b"></select></label>
+      </div>
+      <div class="table-wrap" tabindex="0" aria-label="설비별 지표 비교">
+        <table>
+          <thead><tr><th scope="col">지표</th><th scope="col" id="compare-a-name">설비 A</th><th scope="col" id="compare-b-name">설비 B</th></tr></thead>
+          <tbody id="compare-result"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="data-panel" class="panel data-panel" aria-labelledby="input-title" hidden>
+      <div class="panel-heading"><h2 id="input-title">CSV 자료 연계 및 품질 검사</h2></div>
+      <p>UTF-8 CSV 네 개를 설비 ID로 연결합니다. 읽은 데이터는 브라우저 탭에만 보관하며 새로고침하면 평가가 초기화됩니다.</p>
+      <form id="data-form">
+        <div id="data-fields" class="data-fields"></div>
+        <div class="form-actions">
+          <button type="submit" class="primary-button" id="inspect-files">파일 검사</button>
+          <button type="button" class="outline-button" id="inspect-sample">예제 자료 검사</button>
+          <button type="button" class="outline-button" id="restore-demo">기본 시범 데이터</button>
+        </div>
+      </form>
+      <p id="data-status" class="weight-status" role="status"></p>
+      <div id="quality-report" class="quality-report" hidden>
+        <h3>품질 검사 결과</h3>
+        <p id="quality-summary"></p>
+        <p>필수값 누락, 범위 오류 또는 ID의 중복·미연계가 있는 설비는 평가에서 제외합니다.</p>
+        <div class="table-wrap quality-table" tabindex="0" aria-label="품질 검사 상세 결과">
+          <table>
+            <thead><tr><th scope="col">자료</th><th scope="col">구분</th><th scope="col">위치</th><th scope="col">내용</th></tr></thead>
+            <tbody id="quality-rows"></tbody>
+          </table>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="primary-button" id="apply-data">유효 설비 평가</button>
+          <button type="button" class="outline-button" id="export-quality">품질 결과 CSV</button>
+        </div>
+      </div>
+    </section>
 
     <div id="model" class="model-view" hidden>
       <section class="panel workflow-panel" aria-labelledby="workflow-title">
@@ -206,7 +260,7 @@
         </section>
 
         <section class="panel model-panel" aria-labelledby="comparison-title">
-          <h2 id="comparison-title">데이터 확보 수준별 평가 방식</h2>
+          <h2 id="comparison-title">평가 지표</h2>
           <div class="comparison">
             <article>
               <div><h3>상태지수 HI</h3><span class="model-tag implemented">시연</span></div>
@@ -217,8 +271,9 @@
               <p>상태·운전·영향 점수의 가중합으로 검토 순위를 산정합니다.</p>
             </article>
             <article>
-              <div><h3>정량 위험도 <span class="math">PoF × CoF</span></h3><span class="model-tag">연구 검토</span></div>
-              <p>관측기간과 고장이력으로 PoF를 추정하고, 정의된 고장영향 CoF를 적용합니다.</p>
+              <div><h3>정량 위험도 <span class="math">PoF × CoF</span></h3><span class="model-tag implemented">CSV 평가</span></div>
+              <p>연간 고장률 λ = 고장건수 ÷ 관측연수. 일정 고장률을 가정하여 1년 PoF = 1 − exp(−λ)로 계산합니다. CoF는 입력한 고장영향 점수(0~100)이며 Risk = 1년 PoF × CoF입니다.</p>
+              <p>고장이 0건이면 추정 PoF는 0으로 표시됩니다. 짧은 관측기간의 추정값은 불확실하며, 검증된 운영용 고장확률로 사용하기 어렵습니다.</p>
             </article>
             <article>
               <div><h3>시간가변 위험도 <span class="math">RI(t)</span></h3><span class="model-tag">연구 검토</span></div>
@@ -229,7 +284,7 @@
       </div>
     </div>
 
-    <footer>제안발표용 시연 · 점수, 구분 기준 및 점검·교체 검토 방향은 가상 자료를 사용한 예시입니다.</footer>
+    <footer>연구 시제품 · 기본 시범 자료는 가상 데이터이며, 점수와 구분 기준은 검토용입니다.</footer>
     <noscript><p class="notice">평가 화면을 사용하려면 브라우저에서 JavaScript를 활성화해 주세요.</p></noscript>
   </main>
 </body>
