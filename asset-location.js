@@ -2,7 +2,57 @@
   'use strict';
 
   const gradeColors = { 우선검토: 'red', 관찰: 'gold', 일반: 'blue', 평가보류: 'gray' };
-  const demoCenters = [[35.968, 126.976], [35.824, 127.148], [35.970, 126.727], [35.576, 126.856]];
+  const osmAttribution = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  const demoArea = '대전 유성구';
+  // Road centerlines adapted from OpenStreetMap. Feeder and roadside assets are fictional.
+  const demoFeeder = [
+    {
+      road: '대학로',
+      path: [
+        [36.362271, 127.345001], [36.361342, 127.347630], [36.360738, 127.349395],
+        [36.360478, 127.350610], [36.360373, 127.351326], [36.360345, 127.351724],
+        [36.360361, 127.352591], [36.360443, 127.353218], [36.360616, 127.353822],
+        [36.361245, 127.355882], [36.361558, 127.356718],
+      ],
+      points: [
+        [36.362095, 127.345275], [36.361911, 127.345740], [36.361679, 127.346481],
+        [36.361473, 127.347008], [36.361298, 127.347532], [36.361118, 127.348000],
+        [36.360892, 127.348744], [36.360692, 127.349274], [36.360570, 127.349834],
+        [36.360445, 127.350329], [36.360339, 127.351120], [36.360265, 127.351706],
+        [36.360283, 127.352283], [36.360299, 127.352813], [36.360482, 127.353589],
+        [36.360629, 127.354148], [36.360799, 127.354674], [36.360930, 127.355165],
+        [36.361182, 127.355896], [36.361366, 127.356442],
+      ],
+    },
+    {
+      road: '궁동로',
+      path: [
+        [36.361342, 127.347630], [36.362834, 127.347406], [36.363197, 127.347492],
+        [36.363246, 127.347553], [36.363256, 127.348547], [36.363507, 127.348549],
+        [36.363567, 127.348871], [36.363934, 127.350150],
+      ],
+      points: [
+        [36.361641, 127.347675], [36.362086, 127.347630], [36.362763, 127.347495],
+        [36.363178, 127.347611], [36.363180, 127.348143], [36.363375, 127.348660],
+        [36.363604, 127.349233], [36.363756, 127.349830],
+      ],
+    },
+    {
+      road: '농대로',
+      path: [
+        [36.360616, 127.353822], [36.361742, 127.353191], [36.363493, 127.353010],
+        [36.364598, 127.352829], [36.364957, 127.352658], [36.365775, 127.351963],
+        [36.366257, 127.351927],
+      ],
+      points: [
+        [36.361010, 127.353699], [36.361574, 127.353408], [36.362459, 127.353195],
+        [36.363149, 127.353146], [36.363818, 127.353047], [36.364426, 127.352969],
+        [36.365297, 127.352464], [36.365848, 127.352058],
+      ],
+    },
+  ];
+  const demoLocations = demoFeeder.flatMap(({ road, points }) =>
+    points.map(point => ({ point, road, area: demoArea })));
   const number = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 
   function readLocation(row) {
@@ -35,18 +85,40 @@
     if (!match || asset.type === '지중케이블') return {};
     const index = Number(match[1]) - 1;
     if (index < 0 || index >= 48) return {};
-    const [latitude, longitude] = demoCenters[index % demoCenters.length];
-    const offset = Math.floor(index / demoCenters.length);
-    return { point: [latitude + (offset % 4 - 1.5) * 0.012, longitude + (Math.floor(offset / 4) - 1) * 0.015] };
+    // Every third item in each group of four demo records is an underground cable.
+    return demoLocations[index - Math.floor((index + 1) / 4)] ?? {};
+  }
+
+  function assetSearchText(asset, demo) {
+    const { road, area } = demo ? assetLocation(asset, true) : {};
+    const fields = [asset.id, asset.name, asset.region];
+    if (road) fields.push(area, road);
+    return fields.join(' ').toLowerCase();
   }
 
   const oneDecimal = value => value == null ? '—' : value.toFixed(1);
   const percent = value => value == null ? '—' : oneDecimal(value * 100) + '%';
 
-  function fitLocations(view, rows) {
+  function fitLocations(view, rows, fullDemo) {
     if (!rows.length) return;
     const bounds = L.latLngBounds(rows.map(row => row.point));
-    view.fitBounds(bounds, { padding: [36, 36], maxZoom: 15, animate: false });
+    if (fullDemo) {
+      for (const { path } of demoFeeder) bounds.extend(L.latLngBounds(path));
+    }
+    view.fitBounds(bounds, {
+      padding: [29, 29], maxZoom: rows.some(row => row.road) ? 17 : 15, animate: false,
+    });
+  }
+
+  function drawDemoFeeder(layer) {
+    for (const [index, { path }] of demoFeeder.entries()) {
+      const style = { interactive: false, lineJoin: 'round' };
+      L.polyline(path, { ...style, color: '#fff', weight: 7, opacity: 0.92 }).addTo(layer);
+      L.polyline(path, {
+        ...style, color: index === 0 ? '#153e80' : '#278090', weight: 4,
+        dashArray: index === 0 ? null : '7 6',
+      }).addTo(layer);
+    }
   }
 
   function makePopup(rows, select) {
@@ -82,7 +154,7 @@
       const count = group.length;
       const title = count > 1 ? '같은 위치의 설비 ' + count + '대'
         : first.name + ' · ' + first.id + ' · ' + first.grade;
-      const size = count > 1 ? 28 : 19;
+      const size = count > 1 ? 28 : first.road ? 16 : 19;
       const marker = L.marker(first.point, {
         title,
         icon: L.divIcon({
@@ -123,16 +195,21 @@
       const invalid = locations.filter(row => row.issue).length;
       const missing = locations.length - plotted.length - invalid;
       const selected = plotted.find(row => row.id === selectedId);
+      const hasDemoFeeder = plotted.some(row => row.road);
+      const fullDemo = hasDemoFeeder && !query && !type && !grade;
 
       useEffect(() => {
         if (!window.L) return;
-        const view = L.map(node.current, { scrollWheelZoom: false, fadeAnimation: false, maxZoom: 19 })
-          .setView([35.85, 127.04], 10);
+        const view = L.map(node.current, {
+          scrollWheelZoom: true, wheelPxPerZoomLevel: 100, fadeAnimation: false, maxZoom: 19,
+        }).setView([35.85, 127.04], 10);
         view.attributionControl.setPrefix(false);
         L.control.scale({ imperial: false }).addTo(view);
         const resize = new ResizeObserver(() => view.invalidateSize({ pan: false }));
         resize.observe(node.current);
-        mapState.current = { view, layer: L.layerGroup().addTo(view), markers: new Map() };
+        mapState.current = {
+          view, feeder: L.layerGroup().addTo(view), layer: L.layerGroup().addTo(view), markers: new Map(),
+        };
         return () => {
           resize.disconnect();
           view.remove();
@@ -145,7 +222,7 @@
         const { view } = mapState.current;
         let loaded = false;
         const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          attribution: osmAttribution,
           maxZoom: 19, updateWhenIdle: true,
         });
         tiles.on('loading', () => { loaded = false; });
@@ -157,17 +234,28 @@
 
       useEffect(() => {
         const state = mapState.current;
+        if (!state || !hasDemoFeeder) return;
+        drawDemoFeeder(state.feeder);
+        state.view.attributionControl.addAttribution(osmAttribution);
+        return () => {
+          state.feeder.clearLayers();
+          state.view.attributionControl.removeAttribution(osmAttribution);
+        };
+      }, [hasDemoFeeder]);
+
+      useEffect(() => {
+        const state = mapState.current;
         if (!state) return;
         state.markers = drawLocations(state.view, state.layer, plotted, select);
         const initial = state.markers.get(pendingFocus.current);
         pendingFocus.current = null;
         if (initial) {
-          state.view.setView(initial.getLatLng(), 15, { animate: false });
+          state.view.setView(initial.getLatLng(), hasDemoFeeder ? 17 : 15, { animate: false });
           initial.openPopup();
         } else {
-          fitLocations(state.view, plotted);
+          fitLocations(state.view, plotted, fullDemo);
         }
-      }, [plotted]);
+      }, [plotted, fullDemo, hasDemoFeeder]);
 
       useEffect(() => {
         const markers = mapState.current?.markers;
@@ -194,7 +282,7 @@
               onClick: () => {
                 const { view } = mapState.current;
                 view.closePopup();
-                fitLocations(view, plotted);
+                fitLocations(view, plotted, fullDemo);
               },
             }, '표시 설비 전체 보기')),
           h('div', { className: 'filters asset-map-filters' },
@@ -212,11 +300,17 @@
               h('span', { key: name }, h('i', { className: 'pin-' + gradeColors[name], 'aria-hidden': true }), name))),
             h('p', { role: 'status' }, '지도 표시 ' + plotted.length + '대 · 좌표 미등록 ' + missing + '대'
               + (invalid ? ' · 좌표 오류 ' + invalid + '대' : ''))),
+          hasDemoFeeder && h('div', { className: 'asset-feeder-legend', 'aria-label': '가상 선로 범례' },
+            h('strong', null, demoArea + ' · 배전선로 시연'),
+            h('span', { className: 'asset-feeder-main' }, '가상 주선로'),
+            h('span', { className: 'asset-feeder-branch' }, '가상 분기선')),
           h('div', { className: 'asset-map-frame' },
             h('div', { ref: node, className: 'asset-map-canvas', role: 'region', 'aria-label': '배전설비 위치 지도' }),
             (!plotted.length || !window.L) && h('p', { className: 'asset-map-empty' }, empty)),
           h('div', { className: 'asset-map-footer' },
-            h('p', { role: 'status' }, tileNotice || (demo ? '마커는 검증용 가상 좌표입니다.' : '')),
+            h('p', null, '지도 위 마우스 휠로 확대·축소'),
+            hasDemoFeeder && h('p', null, '선로·설비 위치는 도로를 참고한 가상 배치입니다.'),
+            tileNotice && h('p', { className: 'asset-map-notice', role: 'status' }, tileNotice),
             canLoadTiles && h('label', null, h('input', {
               type: 'checkbox', checked: showTiles, onChange: event => toggleTiles(event.target.checked),
             }), ' 배경지도 표시'))),
@@ -224,7 +318,7 @@
           h('h2', { id: 'asset-map-detail-heading' }, '선택 설비'),
           !selected ? h('p', null, '지도에서 설비를 선택하세요.') : h(React.Fragment, null,
             h('h3', { className: 'asset-map-name' }, selected.name),
-            h('p', { className: 'subtext' }, [selected.id, selected.type, selected.region].join(' · ')),
+            h('p', { className: 'subtext' }, [selected.id, selected.type, selected.road ?? selected.region].join(' · ')),
             h('div', { className: 'detail-hero' },
               h('div', null, h('span', null, '위험도 평가지수'), h('strong', null, oneDecimal(selected.Risk))),
               h('span', { className: 'badge ' + gradeColors[selected.grade] }, h('i'), selected.grade)),
@@ -239,5 +333,5 @@
     };
   }
 
-  window.GridAssetLocations = { createPage, assetLocation, locationIssues };
+  window.GridAssetLocations = { createPage, assetLocation, assetSearchText, locationIssues };
 })();
